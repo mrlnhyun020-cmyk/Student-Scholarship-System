@@ -1,0 +1,16 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root { font-synthesis: none; text-rendering: optimizeLegibility; }
+body { margin: 0; min-width: 320px; background: #f8fafc; }
+button, input, select, textarea { font: inherit; }
+* { box-sizing: border-box; }
+::selection { background: #bfdbfe; color: #1e3a8a; }
+.form-input {
+  display: block; width: 100%; border: 1px solid #e2e8f0; border-radius: .75rem;
+  background: #f8fafc; padding: .7rem .85rem; font-size: .875rem; color: #1e293b;
+  outline: none; transition: border-color .15s, box-shadow .15s, background .15s;
+}
+.form-input:focus { border-color: #60a5fa; background: #fff; box-shadow: 0 0 0 4px rgb(59 130 246 / .10); }
+.form-input::placeholder { color: #94a3b8; }
