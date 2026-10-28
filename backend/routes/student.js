@@ -4,6 +4,8 @@ const mongoose = require("mongoose");
 const router = express.Router();
 const Student = require("../models/student");
 
+const { authenticateToken, requireAdmin } = require("../middleware/auth");
+
 // Allowed fields for creating and updating students
 const allowedFields = [
   "studentId",
@@ -16,7 +18,7 @@ const allowedFields = [
 ];
 
 // GET: Retrieve all students
-router.get("/", async (req, res) => {
+router.get("/", authenticateToken, requireAdmin, async (req, res) => {
   try {
     const students = await Student.find();
 
@@ -35,7 +37,7 @@ router.get("/", async (req, res) => {
 
 // GET: Search students
 // Keep this route above /:id
-router.get("/search", async (req, res) => {
+router.get("/", authenticateToken, requireAdmin, async (req, res) => {
   try {
     const query = String(req.query.query || "").trim();
 
@@ -76,7 +78,7 @@ router.get("/search", async (req, res) => {
 });
 
 // GET: Retrieve one student by MongoDB ID
-router.get("/:id", async (req, res) => {
+router.get("/", authenticateToken, requireAdmin, async (req, res) => {
   try {
     if (!mongoose.isValidObjectId(req.params.id)) {
       return res.status(400).json({
@@ -107,7 +109,7 @@ router.get("/:id", async (req, res) => {
 });
 
 // POST: Add a student
-router.post("/", async (req, res) => {
+router.post("/", authenticateToken, requireAdmin, async (req, res) => {
   try {
     const student = await Student.create(req.body);
 
@@ -124,7 +126,7 @@ router.post("/", async (req, res) => {
 });
 
 // PUT: Update a student
-router.put("/:id", async (req, res) => {
+router.put("/", authenticateToken, requireAdmin, async (req, res) => {
   try {
     if (!mongoose.isValidObjectId(req.params.id)) {
       return res.status(400).json({
@@ -178,7 +180,7 @@ router.put("/:id", async (req, res) => {
 });
 
 // DELETE: Remove a student
-router.delete("/:id", async (req, res) => {
+router.delete("/", authenticateToken, requireAdmin, async (req, res) => {
   try {
     if (!mongoose.isValidObjectId(req.params.id)) {
       return res.status(400).json({

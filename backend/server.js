@@ -9,8 +9,11 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-// Student API routes
+// API routes
 app.use("/api/students", require("./routes/student"));
+app.use("/api/auth", require("./routes/auth"));
+app.use("/api/scholarship", require("./routes/scholarship"));
+app.use("/api/applications", require("./routes/applications"));
 
 // Test route
 app.get("/", (req, res) => {
