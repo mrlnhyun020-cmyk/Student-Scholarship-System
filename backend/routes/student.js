@@ -2,11 +2,10 @@
 const express = require("express");
 const mongoose = require("mongoose");
 const router = express.Router();
-const Student = require("../models/student");
 
+const Student = require("../models/student");
 const { authenticateToken, requireAdmin } = require("../middleware/auth");
 
-// Allowed fields for creating and updating students
 const allowedFields = [
   "studentId",
   "fullName",
@@ -17,10 +16,10 @@ const allowedFields = [
   "scholarshipStatus",
 ];
 
-// GET: Retrieve all students
+// GET: Retrieve all student records
 router.get("/", authenticateToken, requireAdmin, async (req, res) => {
   try {
-    const students = await Student.find();
+    const students = await Student.find().sort({ createdAt: -1 });
 
     res.status(200).json({
       success: true,
@@ -35,9 +34,8 @@ router.get("/", authenticateToken, requireAdmin, async (req, res) => {
   }
 });
 
-// GET: Search students
-// Keep this route above /:id
-router.get("/", authenticateToken, requireAdmin, async (req, res) => {
+// GET: Search student records
+router.get("/search", authenticateToken, requireAdmin, async (req, res) => {
   try {
     const query = String(req.query.query || "").trim();
 
@@ -48,10 +46,8 @@ router.get("/", authenticateToken, requireAdmin, async (req, res) => {
       });
     }
 
-    const pattern = new RegExp(
-      query.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"),
-      "i"
-    );
+    const escapedQuery = query.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const pattern = new RegExp(escapedQuery, "i");
 
     const students = await Student.find({
       $or: [
@@ -78,7 +74,7 @@ router.get("/", authenticateToken, requireAdmin, async (req, res) => {
 });
 
 // GET: Retrieve one student by MongoDB ID
-router.get("/", authenticateToken, requireAdmin, async (req, res) => {
+router.get("/:id", authenticateToken, requireAdmin, async (req, res) => {
   try {
     if (!mongoose.isValidObjectId(req.params.id)) {
       return res.status(400).json({
@@ -125,8 +121,10 @@ router.post("/", authenticateToken, requireAdmin, async (req, res) => {
   }
 });
 
-// PUT: Update a student
-router.put("/", authenticateToken, requireAdmin, async (req, res) => {
+
+
+ // PUT: Update a student (admins cannot change identity fields)
+router.put("/:id", authenticateToken, requireAdmin, async (req, res) => {
   try {
     if (!mongoose.isValidObjectId(req.params.id)) {
       return res.status(400).json({
@@ -135,9 +133,31 @@ router.put("/", authenticateToken, requireAdmin, async (req, res) => {
       });
     }
 
+    // Prevent admins from changing identity fields
+    const protectedFields = ["fullName", "studentId", "email"];
+
+    const attemptedProtectedField = protectedFields.find((field) =>
+      Object.prototype.hasOwnProperty.call(req.body, field)
+    );
+
+    if (attemptedProtectedField) {
+      return res.status(403).json({
+        success: false,
+        message: `${attemptedProtectedField} cannot be changed by the administrator.`,
+      });
+    }
+
+    // Only these fields may be edited by admins
+    const editableFields = [
+      "course",
+      "yearLevel",
+      "scholarshipType",
+      "scholarshipStatus",
+    ];
+
     const updates = {};
 
-    for (const field of allowedFields) {
+    for (const field of editableFields) {
       if (Object.prototype.hasOwnProperty.call(req.body, field)) {
         updates[field] = req.body[field];
       }
@@ -146,17 +166,14 @@ router.put("/", authenticateToken, requireAdmin, async (req, res) => {
     if (Object.keys(updates).length === 0) {
       return res.status(400).json({
         success: false,
-        message: "No valid student fields provided.",
+        message: "No valid editable student fields provided.",
       });
     }
 
     const student = await Student.findByIdAndUpdate(
       req.params.id,
-      updates,
-      {
-        new: true,
-        runValidators: true,
-      }
+      { $set: updates },
+      { new: true, runValidators: true }
     );
 
     if (!student) {
@@ -166,21 +183,22 @@ router.put("/", authenticateToken, requireAdmin, async (req, res) => {
       });
     }
 
-    res.status(200).json({
+    return res.status(200).json({
       success: true,
       message: "Student updated successfully.",
       data: student,
     });
   } catch (error) {
-    res.status(400).json({
+    return res.status(400).json({
       success: false,
       message: error.message,
     });
   }
 });
 
+
 // DELETE: Remove a student
-router.delete("/", authenticateToken, requireAdmin, async (req, res) => {
+router.delete("/:id", authenticateToken, requireAdmin, async (req, res) => {
   try {
     if (!mongoose.isValidObjectId(req.params.id)) {
       return res.status(400).json({

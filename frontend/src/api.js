@@ -86,6 +86,15 @@ export async function getMyProfile(token) {
 }
 
 
+export async function updateMyProfile(profileData, token) {
+  return request('/auth/profile', {
+    method: 'PUT',
+    headers: authHeaders(token),
+    body: JSON.stringify(profileData),
+  })
+}
+
+
 export async function getScholarships(token) {
   return request('/scholarship', {
     headers: authHeaders(token),
@@ -127,11 +136,8 @@ export async function deleteScholarship(id, token) {
 export async function submitApplication(applicationData, token) {
   const formData = new FormData();
 
-  formData.append('scholarshipId', applicationData.scholarshipId);
-  formData.append('course', applicationData.course);
-  formData.append('yearLevel', applicationData.yearLevel);
-  formData.append('gradeAverage', applicationData.gradeAverage);
-  formData.append('statement', applicationData.statement);
+ formData.append('scholarshipId', applicationData.scholarshipId);
+ formData.append('statement', applicationData.statement);
 
   (applicationData.documents || []).forEach((document, index) => {
     if (document.file) {
@@ -201,4 +207,14 @@ export async function openApplicationDocument(
 
   // Release the temporary browser URL after a delay.
   setTimeout(() => URL.revokeObjectURL(url), 60000);
+}
+
+
+
+export async function askScholarTrackAI(message, token) {
+  return request("/ai", {
+    method: "POST",
+    headers: authHeaders(token),
+    body: JSON.stringify({ message }),
+  });
 }

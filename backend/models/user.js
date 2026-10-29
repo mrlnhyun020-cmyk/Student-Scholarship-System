@@ -29,6 +29,38 @@ const userSchema = new mongoose.Schema(
       default: "student",
       required: true,
     },
+
+    // Student profile information
+    studentId: {
+      type: String,
+      trim: true,
+      default: "",
+    },
+
+    course: {
+      type: String,
+      trim: true,
+      default: "",
+    },
+
+    yearLevel: {
+      type: String,
+      trim: true,
+      default: "",
+    },
+
+    gradeAverage: {
+      type: Number,
+      min: 0,
+      max: 100,
+      default: null,
+    },
+
+    contactNumber: {
+      type: String,
+      trim: true,
+      default: "",
+    },
   },
   { timestamps: true }
 );

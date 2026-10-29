@@ -13,6 +13,7 @@ import {
   loginUser,
   registerUser,
   getMyProfile,
+  updateMyProfile,
   getPublishedScholarships,
   getMyApplications,
   submitApplication,
@@ -23,6 +24,7 @@ import {
   getAllApplications,
   updateApplicationStatus,
   openApplicationDocument,
+  askScholarTrackAI,
 } from './api'
 
 const initialForm = {
@@ -94,9 +96,63 @@ export default function App() {
   const [authError, setAuthError] = useState('')
   const [students, setStudents] = useState([])
   const [studentProfile, setStudentProfile] = useState(null)
+  const [profileForm, setProfileForm] = useState({
+          fullName: '',
+          studentId: '',
+          course: '',
+          yearLevel: '',
+          gradeAverage: '',
+          contactNumber: '',
+        })
+  const [profileSaving, setProfileSaving] = useState(false)
+  const [profileEditing, setProfileEditing] = useState(false)
+  const [profileNotice, setProfileNotice] = useState('')
   const [profileLoading, setProfileLoading] = useState(false)
   const [profileError, setProfileError] = useState('')
   const [studentPage, setStudentPage] = useState('browse')
+  const [aiMessages, setAiMessages] = useState([
+  {
+    role: 'assistant',
+    content: 'Hi! I am your ScholarTrack AI assistant. Ask me about scholarship requirements, application documents, or writing your application statement.'
+  }
+])
+const [aiInput, setAiInput] = useState('')
+const [aiLoading, setAiLoading] = useState(false)
+const [aiError, setAiError] = useState('')
+
+async function handleAskAI(event) {
+  event.preventDefault();
+
+  const message = aiInput.trim();
+  if (!message || aiLoading) return;
+
+  setAiMessages((previous) => [
+    ...previous,
+    { role: 'user', content: message },
+  ]);
+  setAiInput('');
+  setAiError('');
+  setAiLoading(true);
+
+  try {
+    const result = await askScholarTrackAI(message, auth?.token);
+
+    setAiMessages((previous) => [
+      ...previous,
+      {
+        role: 'assistant',
+        content: result.answer || 'I could not generate an answer.',
+      },
+    ]);
+  } catch (error) {
+    setAiError(
+      error.message || 'The AI assistant is temporarily unavailable.'
+    );
+  } finally {
+    setAiLoading(false);
+  }
+}
+
   const [publishedScholarships, setPublishedScholarships] = useState([])
   const [publishedLoading, setPublishedLoading] = useState(false)
   const [publishedError, setPublishedError] = useState('')
@@ -145,7 +201,47 @@ export default function App() {
     }
   }, [auth?.token])
 
- 
+
+async function handleSaveProfile(event) {
+  event.preventDefault()
+  setProfileSaving(true)
+  setProfileError('')
+  setProfileNotice('')
+
+  try {
+    const result = await updateMyProfile(
+      {
+        fullName: profileForm.fullName.trim(),
+        studentId: profileForm.studentId.trim(),
+        course: profileForm.course.trim(),
+        yearLevel: profileForm.yearLevel,
+        gradeAverage: Number(profileForm.gradeAverage),
+        contactNumber: profileForm.contactNumber.trim(),
+      },
+      auth?.token
+    )
+
+    setStudentProfile((previous) => ({
+      ...previous,
+      user: result.data.user,
+    }))
+
+    setProfileForm((previous) => ({
+      ...previous,
+      ...result.data.user,
+      gradeAverage: result.data.user.gradeAverage ?? '',
+    }))
+
+    setProfileNotice('Your profile was saved successfully.')
+    setProfileEditing(false)
+  } catch (error) {
+    setProfileError(error.message || 'Could not save your profile.')
+  } finally {
+    setProfileSaving(false)
+  }
+}
+
+
 async function handleSubmitApplication(event) {
   event.preventDefault()
   if (!applicationScholarship) return
@@ -376,7 +472,19 @@ async function handleApplicationReview(applicationId, status) {
     getMyProfile(auth.token)
       .then((result) => {
         if (!cancelled) {
-          setStudentProfile(result.data || null)
+          const profile = result.data || null
+
+          setStudentProfile(profile)
+
+          setProfileForm({
+            fullName: profile?.user?.fullName || '',
+            studentId: profile?.user?.studentId || '',
+            course: profile?.user?.course || '',
+            yearLevel: profile?.user?.yearLevel || '',
+            gradeAverage:
+              profile?.user?.gradeAverage ?? '',
+            contactNumber: profile?.user?.contactNumber || '',
+          })
         }
       })
       .catch((e) => {
@@ -493,8 +601,20 @@ async function handleApplicationReview(applicationId, status) {
     }
 
     try {
-      if (editingStudent) {
-        await updateStudent(editingStudent._id, studentData, auth?.token)
+     if (editingStudent) {
+        const {
+          studentId,
+          fullName,
+          email,
+          ...editableStudentData
+        } = studentData
+
+        await updateStudent(
+          editingStudent._id,
+          editableStudentData,
+          auth?.token
+        )
+
         setNotice('Student record updated successfully.')
       } else {
         await createStudent(studentData, auth?.token)
@@ -659,8 +779,34 @@ async function handleApplicationReview(applicationId, status) {
             <button onClick={() => setStudentPage('record')} className={`rounded-xl px-4 py-2.5 text-sm font-semibold ${studentPage === 'record' ? 'bg-blue-600 text-white' : 'text-slate-600 hover:bg-slate-100'}`}>
               <span className="inline-flex items-center gap-2"><BookOpen size={16} /> My scholarship record</span>
             </button>
+            
             <button onClick={() => { setStudentPage('applications'); loadMyApplications(); }} className={`rounded-xl px-4 py-2.5 text-sm font-semibold ${studentPage === 'applications' ? 'bg-blue-600 text-white' : 'text-slate-600 hover:bg-slate-100'}`}>
               <span className="inline-flex items-center gap-2"><BookOpen size={16} /> My applications</span>
+            </button>
+
+            
+            <button
+              onClick={() => setStudentPage('profile')}
+              className={`rounded-xl px-4 py-2.5 text-sm font-semibold ${
+                studentPage === 'profile'
+                  ? 'bg-blue-600 text-white'
+                  : 'text-slate-600 hover:bg-slate-100'
+              }`}
+            >
+              My Profile
+            </button>
+
+            <button
+              onClick={() => setStudentPage('ai')}
+              className={`rounded-xl px-4 py-2.5 text-sm font-semibold ${
+                studentPage === 'ai'
+                  ? 'bg-blue-600 text-white'
+                  : 'text-slate-600 hover:bg-slate-100'
+              }`}
+            >
+              <span className="inline-flex items-center gap-2">
+                <Sparkles size={16} /> AI Assistant
+              </span>
             </button>
           </nav>
 
@@ -732,12 +878,13 @@ async function handleApplicationReview(applicationId, status) {
                               setApplicationNotice('')
                               setApplicationsError('')
                               setApplicationForm({
-                                course: studentProfile?.scholarship?.course || '',
-                                yearLevel: studentProfile?.scholarship?.yearLevel || '',
-                                gradeAverage: '',
-                                statement: ''
+                                course: studentProfile?.user?.course || '',
+                                yearLevel: studentProfile?.user?.yearLevel || '',
+                                gradeAverage: studentProfile?.user?.gradeAverage ?? '',
+                                statement: '',
+                                documents: [],
                               })
-                            }}
+                            }}  
                             className={`mt-5 w-full rounded-xl px-4 py-3 text-sm font-semibold ${
                               alreadyApplied
                                 ? 'cursor-not-allowed border border-emerald-200 bg-emerald-50 text-emerald-700'
@@ -751,9 +898,38 @@ async function handleApplicationReview(applicationId, status) {
                       {applicationScholarship && (applicationScholarship._id || applicationScholarship.id) === (item._id || item.id) && (
                         <form onSubmit={handleSubmitApplication} className="mt-4 space-y-4 rounded-xl border border-blue-100 bg-blue-50/50 p-4">
                           <h4 className="font-bold text-slate-900">Apply for {item.title}</h4>
-                          <Field label="Course" required><input className="form-input" required value={applicationForm.course} onChange={e => setApplicationForm(prev => ({ ...prev, course: e.target.value }))} placeholder="e.g. BSIT" /></Field>
-                          <Field label="Year level" required><select className="form-input" required value={applicationForm.yearLevel} onChange={e => setApplicationForm(prev => ({ ...prev, yearLevel: e.target.value }))}><option value="">Select year level</option>{years.map(year => <option key={year} value={year}>{year}</option>)}</select></Field>
-                          <Field label="Grade average (0–100)" required><input className="form-input" type="number" min="0" max="100" step="0.01" required value={applicationForm.gradeAverage} onChange={e => setApplicationForm(prev => ({ ...prev, gradeAverage: e.target.value }))} placeholder="e.g. 88.5" /></Field>
+                          
+                          <Field label="Course (from your profile)" required>
+                            <input
+                              className="form-input"
+                              required
+                              readOnly
+                              value={applicationForm.course}
+                            />
+                          </Field>
+
+                          <Field label="Year level (from your profile)" required>
+                            <input
+                              className="form-input"
+                              required
+                              readOnly
+                              value={applicationForm.yearLevel}
+                            />
+                          </Field>
+
+                          <Field label="Grade average (from your profile)" required>
+                            <input
+                              className="form-input"
+                              type="number"
+                              min="0"
+                              max="100"
+                              step="0.01"
+                              required
+                              readOnly
+                              value={applicationForm.gradeAverage}
+                            />
+                          </Field>
+
                           <Field label="Why are you applying?" required><textarea className="form-input min-h-28" required maxLength={2000} value={applicationForm.statement} onChange={e => setApplicationForm(prev => ({ ...prev, statement: e.target.value }))} placeholder="Briefly explain your goals and why you should be considered." /></Field>
                           
                           {/* Required document uploads */}
@@ -800,32 +976,520 @@ async function handleApplicationReview(applicationId, status) {
               {applicationsError && <div role="alert" className="mb-4 rounded-xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-800">{applicationsError}</div>}
               {applicationsLoading ? <div className="rounded-2xl bg-white p-10 text-center text-slate-500 shadow-sm"><LoaderCircle size={25} className="mx-auto animate-spin text-blue-600" /><p className="mt-3 text-sm">Loading your applications...</p></div> : myApplications.length === 0 ? <div className="rounded-2xl border border-slate-200 bg-white p-10 text-center shadow-sm"><BookOpen size={32} className="mx-auto text-slate-300" /><h3 className="mt-3 font-bold text-slate-800">No applications yet</h3><p className="mt-1 text-sm text-slate-500">Browse scholarships and select Apply now to submit your first application.</p><button onClick={() => setStudentPage('browse')} className="mt-4 rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white">Browse scholarships</button></div> : <div className="space-y-4">{myApplications.map(app => <article key={app._id} className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm"><div className="flex flex-wrap items-start justify-between gap-3"><div><h3 className="text-lg font-bold text-slate-900">{app.scholarship?.title || 'Scholarship'}</h3><p className="mt-1 text-sm text-slate-500">{app.scholarship?.provider || 'Provider not available'} · Submitted {app.createdAt ? new Date(app.createdAt).toLocaleDateString() : 'date unavailable'}</p></div><span className={`inline-flex items-center rounded-full px-3 py-1.5 text-sm font-semibold ring-1 ring-inset ${statusClass(app.status || 'Pending')}`}>{app.status || 'Pending'}</span></div><div className="mt-4 grid gap-3 sm:grid-cols-2"><div className="rounded-xl bg-slate-50 p-3"><p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Course</p><p className="mt-1 font-medium">{app.course}</p></div><div className="rounded-xl bg-slate-50 p-3"><p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Grade average</p><p className="mt-1 font-medium">{app.gradeAverage}</p></div></div>{app.adminFeedback && <p className="mt-3 rounded-xl bg-blue-50 p-3 text-sm text-blue-800"><strong>Admin feedback:</strong> {app.adminFeedback}</p>}</article>)}</div>}
             </section>
-          ) : (
-            <>
+
+            
+              
+              ) : studentPage === 'profile' ? (
+                <section className="mt-6 rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+                  <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+                    <div>
+                      <h2 className="text-2xl font-bold text-slate-900">
+                        My Profile
+                      </h2>
+                      <p className="mt-2 text-sm text-slate-500">
+                        Manage your student information. Your saved information will
+                        be used automatically when applying for scholarships.
+                      </p>
+                    </div>
+
+                    {!profileEditing && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setProfileError('')
+                          setProfileNotice('')
+                          setProfileForm({
+                            fullName: studentProfile?.user?.fullName || '',
+                            studentId: studentProfile?.user?.studentId || '',
+                            course: studentProfile?.user?.course || '',
+                            yearLevel: studentProfile?.user?.yearLevel || '',
+                            gradeAverage: studentProfile?.user?.gradeAverage ?? '',
+                            contactNumber: studentProfile?.user?.contactNumber || '',
+                          })
+                          setProfileEditing(true)
+                        }}
+                        className="rounded-lg bg-indigo-600 px-5 py-2.5 text-sm font-semibold text-white hover:bg-indigo-700"
+                      >
+                        <span className="inline-flex items-center gap-2">
+                          <Pencil size={16} />
+                          Edit My Profile
+                        </span>
+                      </button>
+                    )}
+                  </div>
+
+                  {profileNotice && (
+                    <div className="mt-5 rounded-lg border border-green-200 bg-green-50 p-3 text-sm text-green-700">
+                      {profileNotice}
+                    </div>
+                  )}
+
+                  {profileError && (
+                    <div className="mt-5 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+                      {profileError}
+                    </div>
+                  )}
+
+                  {profileLoading ? (
+                    <div className="mt-8 flex items-center gap-2 text-sm text-slate-500">
+                      <LoaderCircle size={18} className="animate-spin" />
+                      Loading your profile...
+                    </div>
+                  ) : profileEditing ? (
+                    <form onSubmit={handleSaveProfile} className="mt-6 space-y-5">
+                      <div className="grid grid-cols-1 gap-5 md:grid-cols-2">
+                        <div>
+                          <label className="mb-1.5 block text-sm font-medium text-slate-700">
+                            Full Name
+                          </label>
+                          <input
+                            type="text"
+                            value={profileForm.fullName}
+                            onChange={(event) =>
+                              setProfileForm({
+                                ...profileForm,
+                                fullName: event.target.value,
+                              })
+                            }
+                            required
+                            className="w-full rounded-lg border border-slate-300 px-3 py-2.5 outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100"
+                            placeholder="Enter your full name"
+                          />
+                        </div>
+
+                        <div>
+                          <label className="mb-1.5 block text-sm font-medium text-slate-700">
+                            Student ID
+                          </label>
+                          <input
+                            type="text"
+                            value={profileForm.studentId}
+                            onChange={(event) =>
+                              setProfileForm({
+                                ...profileForm,
+                                studentId: event.target.value,
+                              })
+                            }
+                            className="w-full rounded-lg border border-slate-300 px-3 py-2.5 outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100"
+                            placeholder="Enter your student ID"
+                          />
+                        </div>
+
+                        <div>
+                          <label className="mb-1.5 block text-sm font-medium text-slate-700">
+                            Course
+                          </label>
+                          <select
+                            value={profileForm.course}
+                            onChange={(event) =>
+                              setProfileForm({
+                                ...profileForm,
+                                course: event.target.value,
+                              })
+                            }
+                            required
+                            className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100"
+                          >
+                            <option value="">Select your course</option>
+                            <option value="BSIT">BSIT</option>
+                            <option value="BSCS">BSCS</option>
+                            <option value="BSBA">BSBA</option>
+                            <option value="BSED">BSED</option>
+                            <option value="BEED">BEED</option>
+                            <option value="BSHM">BSHM</option>
+                            <option value="BSCRIM">BSCRIM</option>
+                            <option value="Other">Other</option>
+                          </select>
+                        </div>
+
+                        <div>
+                          <label className="mb-1.5 block text-sm font-medium text-slate-700">
+                            Year Level
+                          </label>
+                          <select
+                            value={profileForm.yearLevel}
+                            onChange={(event) =>
+                              setProfileForm({
+                                ...profileForm,
+                                yearLevel: event.target.value,
+                              })
+                            }
+                            required
+                            className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100"
+                          >
+                            <option value="">Select your year level</option>
+                            <option value="1st Year">1st Year</option>
+                            <option value="2nd Year">2nd Year</option>
+                            <option value="3rd Year">3rd Year</option>
+                            <option value="4th Year">4th Year</option>
+                            <option value="5th Year">5th Year</option>
+                          </select>
+                        </div>
+
+                        <div>
+                          <label className="mb-1.5 block text-sm font-medium text-slate-700">
+                            Grade Average
+                          </label>
+                          <input
+                            type="number"
+                            min="0"
+                            max="100"
+                            step="0.01"
+                            value={profileForm.gradeAverage}
+                            onChange={(event) =>
+                              setProfileForm({
+                                ...profileForm,
+                                gradeAverage: event.target.value,
+                              })
+                            }
+                            required
+                            className="w-full rounded-lg border border-slate-300 px-3 py-2.5 outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100"
+                            placeholder="Enter your grade average"
+                          />
+                          <p className="mt-1 text-xs text-slate-500">
+                            Enter your grade average from 0 to 100.
+                          </p>
+                        </div>
+
+                        <div>
+                          <label className="mb-1.5 block text-sm font-medium text-slate-700">
+                            Contact Number
+                          </label>
+                          <input
+                            type="tel"
+                            value={profileForm.contactNumber}
+                            onChange={(event) =>
+                              setProfileForm({
+                                ...profileForm,
+                                contactNumber: event.target.value,
+                              })
+                            }
+                            className="w-full rounded-lg border border-slate-300 px-3 py-2.5 outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100"
+                            placeholder="Enter your contact number"
+                          />
+                        </div>
+
+                        <div className="md:col-span-2">
+                          <label className="mb-1.5 block text-sm font-medium text-slate-700">
+                            Email Address
+                          </label>
+                          <input
+                            type="email"
+                            value={studentProfile?.user?.email || ''}
+                            readOnly
+                            className="w-full cursor-not-allowed rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5 text-slate-500"
+                          />
+                          <p className="mt-1 text-xs text-slate-500">
+                            Your email address is managed by your account.
+                          </p>
+                        </div>
+                      </div>
+
+                      <div className="flex flex-wrap gap-3 border-t border-slate-100 pt-5">
+                        <button
+                          type="submit"
+                          disabled={profileSaving}
+                          className="rounded-lg bg-indigo-600 px-5 py-2.5 text-sm font-semibold text-white hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-60"
+                        >
+                          {profileSaving ? 'Saving...' : 'Update Profile'}
+                        </button>
+
+                        <button
+                          type="button"
+                          disabled={profileSaving}
+                          onClick={() => {
+                            setProfileForm({
+                              fullName: studentProfile?.user?.fullName || '',
+                              studentId: studentProfile?.user?.studentId || '',
+                              course: studentProfile?.user?.course || '',
+                              yearLevel: studentProfile?.user?.yearLevel || '',
+                              gradeAverage: studentProfile?.user?.gradeAverage ?? '',
+                              contactNumber: studentProfile?.user?.contactNumber || '',
+                            })
+                            setProfileError('')
+                            setProfileNotice('')
+                            setProfileEditing(false)
+                          }}
+                          className="rounded-lg border border-slate-300 px-5 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    </form>
+                  ) : (
+                    <div className="mt-6">
+                      <div className="mb-5 flex items-center gap-4 rounded-xl bg-indigo-50 p-5">
+                        <div className="flex h-14 w-14 items-center justify-center rounded-full bg-indigo-100 text-indigo-700">
+                          <GraduationCap size={28} />
+                        </div>
+                        <div>
+                          <h3 className="text-lg font-bold text-slate-900">
+                            {studentProfile?.user?.fullName || 'Student Name'}
+                          </h3>
+                          <p className="text-sm text-slate-600">
+                            {studentProfile?.user?.studentId || 'Student ID not provided'}
+                          </p>
+                          <p className="mt-1 text-sm text-slate-500">
+                            {studentProfile?.user?.email || ''}
+                          </p>
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                        <div className="rounded-xl border border-slate-200 p-4">
+                          <p className="text-sm text-slate-500">Course</p>
+                          <p className="mt-1 font-semibold text-slate-900">
+                            {studentProfile?.user?.course || 'Not provided'}
+                          </p>
+                        </div>
+
+                        <div className="rounded-xl border border-slate-200 p-4">
+                          <p className="text-sm text-slate-500">Year Level</p>
+                          <p className="mt-1 font-semibold text-slate-900">
+                            {studentProfile?.user?.yearLevel || 'Not provided'}
+                          </p>
+                        </div>
+
+                        <div className="rounded-xl border border-slate-200 p-4">
+                          <p className="text-sm text-slate-500">Grade Average</p>
+                          <p className="mt-1 font-semibold text-slate-900">
+                            {studentProfile?.user?.gradeAverage ?? 'Not provided'}
+                          </p>
+                        </div>
+
+                        <div className="rounded-xl border border-slate-200 p-4">
+                          <p className="text-sm text-slate-500">Contact Number</p>
+                          <p className="mt-1 font-semibold text-slate-900">
+                            {studentProfile?.user?.contactNumber || 'Not provided'}
+                          </p>
+                        </div>
+                      </div>
+
+                      {!studentProfile?.user?.course ||
+                      !studentProfile?.user?.yearLevel ||
+                      studentProfile?.user?.gradeAverage == null ? (
+                        <div className="mt-5 rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">
+                          Please complete your course, year level, and grade average.
+                          These details will be used when you apply for scholarships.
+                        </div>
+                      ) : null}
+                    </div>
+                  )}
+                </section>
+
+                ) : studentPage === 'ai' ? (
+                  <section className="mt-6 rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+                    <div className="flex items-center gap-3">
+                      <div className="rounded-xl bg-blue-100 p-3 text-blue-700">
+                        <Sparkles size={24} />
+                      </div>
+                      <div>
+                        <h2 className="text-2xl font-bold text-slate-900">
+                          ScholarTrack AI Assistant
+                        </h2>
+                        <p className="text-sm text-slate-500">
+                          Ask about scholarship requirements, applications, or missing documents.
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="mt-6 max-h-96 space-y-4 overflow-y-auto rounded-xl bg-slate-50 p-4">
+                      {aiMessages.map((item, index) => (
+                        <div
+                          key={index}
+                          className={`whitespace-pre-wrap rounded-xl p-3 text-sm leading-6 ${
+                            item.role === 'user'
+                              ? 'ml-6 bg-blue-600 text-white'
+                              : 'mr-6 border border-slate-200 bg-white text-slate-800'
+                          }`}
+                        >
+                          <div className="space-y-2">
+                          {item.content.split("\n").map((line, lineIndex) => {
+                            const text = line.trim();
+
+                            if (!text) return <div key={lineIndex} className="h-1" />;
+
+                            if (text.startsWith("### ")) {
+                              return (
+                                <h4 key={lineIndex} className="font-bold text-base">
+                                  {text.replace(/^###\s+/, "")}
+                                </h4>
+                              );
+                            }
+
+                            if (text.startsWith("## ")) {
+                              return (
+                                <h3 key={lineIndex} className="font-bold text-lg">
+                                  {text.replace(/^##\s+/, "")}
+                                </h3>
+                              );
+                            }
+
+                            if (text.startsWith("# ")) {
+                              return (
+                                <h2 key={lineIndex} className="font-bold text-xl">
+                                  {text.replace(/^#\s+/, "")}
+                                </h2>
+                              );
+                            }
+
+                            if (/^[-*]\s+/.test(text)) {
+                              return (
+                                <div key={lineIndex} className="flex gap-2">
+                                  <span>•</span>
+                                  <span>
+                                    {text.replace(/^[-*]\s+/, "").split(/(\*\*.*?\*\*)/g).map((part, partIndex) =>
+                                      part.startsWith("**") && part.endsWith("**") ? (
+                                        <strong key={partIndex}>{part.slice(2, -2)}</strong>
+                                      ) : (
+                                        part
+                                      )
+                                    )}
+                                  </span>
+                                </div>
+                              );
+                            }
+
+                            return (
+                              <p key={lineIndex}>
+                                {text.split(/(\*\*.*?\*\*)/g).map((part, partIndex) =>
+                                  part.startsWith("**") && part.endsWith("**") ? (
+                                    <strong key={partIndex}>{part.slice(2, -2)}</strong>
+                                  ) : (
+                                    part
+                                  )
+                                )}
+                              </p>
+                            );
+                          })}
+                        </div>
+                        </div>
+                      ))}
+
+                      {aiLoading && (
+                        <p className="text-sm text-slate-500">
+                          ScholarTrack AI is thinking...
+                        </p>
+                      )}
+                    </div>
+
+                    {aiError && (
+                      <div className="mt-4 rounded-xl bg-rose-50 p-3 text-sm text-rose-700">
+                        {aiError}
+                      </div>
+                    )}
+
+                    <form onSubmit={handleAskAI} className="mt-4 flex flex-col gap-3 sm:flex-row">
+                      <input
+                        className="flex-1 rounded-xl border border-slate-300 px-4 py-3"
+                        value={aiInput}
+                        onChange={(event) => setAiInput(event.target.value)}
+                        placeholder="Ask your scholarship question..."
+                        maxLength={1000}
+                        disabled={aiLoading}
+                      />
+                      <button
+                        type="submit"
+                        disabled={aiLoading || !aiInput.trim()}
+                        className="rounded-xl bg-blue-600 px-5 py-3 font-semibold text-white hover:bg-blue-700 disabled:opacity-50"
+                      >
+                        {aiLoading ? 'Please wait...' : 'Ask AI'}
+                      </button>
+                    </form>
+
+                    <p className="mt-3 text-xs text-slate-500">
+                      AI guidance is informational. Confirm important requirements with your administrator.
+                    </p>
+                  </section>
+                ) : (
+                  <>
+
               {profileLoading && <div className="mt-6 flex items-center gap-3 rounded-2xl bg-white p-6 text-slate-600 shadow-sm"><LoaderCircle size={20} className="animate-spin text-blue-600" /> Loading your scholarship details...</div>}
               {profileError && <div role="alert" className="mt-6 rounded-xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-800"><p className="font-semibold">Unable to load scholarship details</p><p className="mt-1">{profileError}</p></div>}
-              {!profileLoading && !profileError && (scholarship ? (
-                <section className="mt-6 rounded-2xl border border-slate-200 bg-white p-6 shadow-sm sm:p-8">
-                  <div className="flex flex-wrap items-start justify-between gap-3">
-                    <div><p className="text-sm font-medium text-slate-500">Your scholarship record</p><h2 className="mt-1 text-xl font-bold text-slate-900">{scholarship.fullName}</h2></div>
-                    <span className={`inline-flex items-center rounded-full px-3 py-1.5 text-sm font-semibold ring-1 ring-inset ${statusClass(scholarship.scholarshipStatus || 'Pending')}`}>{scholarship.scholarshipStatus || 'Pending'}</span>
-                  </div>
-                  <div className="mt-6 grid gap-4 sm:grid-cols-2">
-                    {[
-                      ['Student ID', scholarship.studentId],
-                      ['Email address', scholarship.email],
-                      ['Course', scholarship.course],
-                      ['Year level', scholarship.yearLevel],
-                      ['Scholarship type', scholarship.scholarshipType],
-                    ].map(([label, value]) => <div key={label} className="rounded-xl bg-slate-50 p-4"><p className="text-xs font-semibold uppercase tracking-wide text-slate-500">{label}</p><p className="mt-2 font-semibold text-slate-900">{value || 'Not provided'}</p></div>)}
-                  </div>
-                </section>
-              ) : (
-                <section className="mt-6 rounded-2xl border border-amber-200 bg-amber-50 p-6 text-amber-900">
-                  <h2 className="font-bold">No scholarship record linked yet</h2>
-                  <p className="mt-2 text-sm leading-6">Your account is active, but we couldn't find a scholarship record with the same email address. Ask the administrator to add or update your student record so its email matches your login email ({studentProfile?.user?.email || auth.user.email}).</p>
-                </section>
-              ))}
+              
+{!applicationsLoading && !applicationsError && myApplications.filter(
+  (app) => app.status === "Approved"
+).length === 0 ? (
+  <section className="mt-6 rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+    <h2 className="text-2xl font-bold text-slate-900">
+      My Scholarship Records
+    </h2>
+    <p className="mt-2 text-sm text-slate-500">
+      No approved scholarships yet. Your records will appear here when an
+      administrator approves your application.
+    </p>
+    <button
+      type="button"
+      onClick={() => setStudentPage("applications")}
+      className="mt-4 rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white"
+    >
+      View My Applications
+    </button>
+  </section>
+) : (
+  <section className="mt-6">
+    <h2 className="mb-4 text-2xl font-bold text-slate-900">
+      My Scholarship Records
+    </h2>
+
+    {applicationsError && (
+      <p className="mb-4 text-sm text-rose-600">{applicationsError}</p>
+    )}
+
+    {applicationsLoading ? (
+      <p className="rounded-xl bg-white p-5 text-slate-500">
+        Loading scholarship records...
+      </p>
+    ) : (
+      <div className="space-y-4">
+        {myApplications
+          .filter((app) => app.status === "Approved")
+          .map((app) => (
+            <article
+              key={app._id}
+              className="rounded-2xl border border-emerald-200 bg-white p-5 shadow-sm"
+            >
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <h3 className="text-lg font-bold text-slate-900">
+                    {app.scholarship?.title || "Scholarship"}
+                  </h3>
+                  <p className="mt-1 text-sm text-slate-500">
+                    Provider: {app.scholarship?.provider || "Not available"}
+                  </p>
+                </div>
+                <span className="rounded-full bg-emerald-50 px-3 py-1.5 text-sm font-semibold text-emerald-700">
+                  Approved
+                </span>
+              </div>
+
+              <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                <p className="rounded-xl bg-slate-50 p-3">
+                  <span className="block text-xs text-slate-500">Course</span>
+                  {app.course || "Not provided"}
+                </p>
+                <p className="rounded-xl bg-slate-50 p-3">
+                  <span className="block text-xs text-slate-500">Year level</span>
+                  {app.yearLevel || "Not provided"}
+                </p>
+                <p className="rounded-xl bg-slate-50 p-3">
+                  <span className="block text-xs text-slate-500">Grade average</span>
+                  {app.gradeAverage ?? "Not provided"}
+                </p>
+              </div>
+
+              {app.adminFeedback && (
+                <p className="mt-4 rounded-xl bg-blue-50 p-3 text-sm text-blue-800">
+                  <strong>Admin feedback:</strong> {app.adminFeedback}
+                </p>
+              )}
+            </article>
+          ))}
+      </div>
+    )}
+  </section>
+)}
+
             </>
           )}
 
@@ -1232,9 +1896,66 @@ async function handleApplicationReview(applicationId, status) {
 
             <form onSubmit={handleSave} className="p-6">
               <div className="grid gap-4 sm:grid-cols-2">
-                <Field label="Student ID" required><input required value={form.studentId} onChange={e => updateForm('studentId', e.target.value)} placeholder="e.g. STU006" className="form-input" /></Field>
-                <Field label="Full name" required><input required value={form.fullName} onChange={e => updateForm('fullName', e.target.value)} placeholder="Student's full name" className="form-input" /></Field>
-                <Field label="Email address" required><input required type="email" value={form.email} onChange={e => updateForm('email', e.target.value)} placeholder="student@example.com" className="form-input" /></Field>
+                <Field label="Student ID" required>
+                  <input
+                    required
+                    value={form.studentId}
+                    readOnly={Boolean(editingStudent)}
+                    onChange={e => updateForm('studentId', e.target.value)}
+                    placeholder="e.g. STU006"
+                    className={`form-input ${
+                      editingStudent
+                        ? 'cursor-not-allowed bg-slate-100 text-slate-500'
+                        : ''
+                    }`}
+                  />
+                  {editingStudent && (
+                    <p className="mt-1 text-xs text-slate-500">
+                      Student ID cannot be changed by the administrator.
+                    </p>
+                  )}
+                </Field>
+                
+                <Field label="Full name" required>
+                  <input
+                    required
+                    value={form.fullName}
+                    readOnly={Boolean(editingStudent)}
+                    onChange={e => updateForm('fullName', e.target.value)}
+                    placeholder="Student's full name"
+                    className={`form-input ${
+                      editingStudent
+                        ? 'cursor-not-allowed bg-slate-100 text-slate-500'
+                        : ''
+                    }`}
+                  />
+                  {editingStudent && (
+                    <p className="mt-1 text-xs text-slate-500">
+                      Student names cannot be edited by the administrator.
+                    </p>
+                  )}
+                </Field>
+
+                <Field label="Email address" required>
+                <input
+                  required
+                  type="email"
+                  value={form.email}
+                  readOnly={Boolean(editingStudent)}
+                  onChange={e => updateForm('email', e.target.value)}
+                  placeholder="student@example.com"
+                  className={`form-input ${
+                    editingStudent
+                      ? 'cursor-not-allowed bg-slate-100 text-slate-500'
+                      : ''
+                  }`}
+                />
+                {editingStudent && (
+                  <p className="mt-1 text-xs text-slate-500">
+                    Email address cannot be changed by the administrator.
+                  </p>
+                )}
+              </Field>
                 <Field label="Course" required><select required value={form.course} onChange={e => updateForm('course', e.target.value)} className="form-input"><option value="">Select course</option>{courses.map(c => <option key={c}>{c}</option>)}</select></Field>
                 <Field label="Year level" required><select required value={form.yearLevel} onChange={e => updateForm('yearLevel', e.target.value)} className="form-input"><option value="">Select year level</option>{years.map(y => <option key={y}>{y}</option>)}</select></Field>
                 <Field label="Scholarship type" required><input required value={form.scholarshipType} onChange={e => updateForm('scholarshipType', e.target.value)} placeholder="e.g. Academic" className="form-input" /></Field>

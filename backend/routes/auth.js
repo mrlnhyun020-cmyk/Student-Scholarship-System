@@ -3,6 +3,8 @@ const express = require("express");
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
 const User = require("../models/user");
+const Student = require("../models/student");
+const { authenticateToken } = require("../middleware/auth");
 
 const router = express.Router();
 
@@ -149,19 +151,12 @@ router.post("/login", async (req, res) => {
   }
 });
 
-
-const { authenticateToken } = require("../middleware/auth");
-const Student = require("../models/student");
-
 // GET /api/auth/me
-// Return the logged-in user's profile and, for students,
-// only the scholarship record matching their account email.
+// Return the logged-in user's account and saved profile.
 router.get("/me", authenticateToken, async (req, res) => {
   try {
-    const User = require("../models/user");
-
     const user = await User.findById(req.user.id).select(
-      "fullName email role"
+      "fullName email role studentId course yearLevel gradeAverage contactNumber"
     );
 
     if (!user) {
@@ -171,6 +166,7 @@ router.get("/me", authenticateToken, async (req, res) => {
       });
     }
 
+    // Preserve the existing scholarship record lookup.
     let scholarship = null;
 
     if (user.role === "student") {
@@ -189,6 +185,11 @@ router.get("/me", authenticateToken, async (req, res) => {
           fullName: user.fullName,
           email: user.email,
           role: user.role,
+          studentId: user.studentId || "",
+          course: user.course || "",
+          yearLevel: user.yearLevel || "",
+          gradeAverage: user.gradeAverage ?? null,
+          contactNumber: user.contactNumber || "",
         },
         scholarship,
       },
@@ -199,6 +200,104 @@ router.get("/me", authenticateToken, async (req, res) => {
     return res.status(500).json({
       success: false,
       message: "Unable to retrieve your profile.",
+    });
+  }
+});
+
+
+// PUT /api/auth/profile
+// Update the logged-in student's profile.
+router.put("/profile", authenticateToken, async (req, res) => {
+  try {
+    if (req.user.role !== "student") {
+      return res.status(403).json({
+        success: false,
+        message: "Only student accounts can update a student profile.",
+      });
+    }
+
+    const {
+      fullName,
+      studentId,
+      course,
+      yearLevel,
+      gradeAverage,
+      contactNumber,
+    } = req.body;
+
+    if (
+      typeof fullName !== "string" ||
+      !fullName.trim() ||
+      typeof studentId !== "string" ||
+      !studentId.trim() ||
+      typeof course !== "string" ||
+      !course.trim() ||
+      typeof yearLevel !== "string" ||
+      !yearLevel.trim() ||
+      gradeAverage === "" ||
+      gradeAverage === null ||
+      gradeAverage === undefined ||
+      !Number.isFinite(Number(gradeAverage)) ||
+      Number(gradeAverage) < 0 ||
+      Number(gradeAverage) > 100 ||
+      (contactNumber !== undefined && typeof contactNumber !== "string")
+    ) {
+      return res.status(400).json({
+        success: false,
+        message:
+          "Please provide your name, student ID, course, year level, and a grade average from 0 to 100.",
+      });
+    }
+
+    const user = await User.findById(req.user.id);
+
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: "User account not found.",
+      });
+    }
+
+    user.fullName = fullName.trim();
+    user.studentId = studentId.trim();
+    user.course = course.trim();
+    user.yearLevel = yearLevel.trim();
+    user.gradeAverage = Number(gradeAverage);
+    user.contactNumber =
+      typeof contactNumber === "string" ? contactNumber.trim() : "";
+
+    await user.save();
+
+    return res.status(200).json({
+      success: true,
+      message: "Student profile updated successfully.",
+      data: {
+        user: {
+          id: user._id,
+          fullName: user.fullName,
+          email: user.email,
+          role: user.role,
+          studentId: user.studentId,
+          course: user.course,
+          yearLevel: user.yearLevel,
+          gradeAverage: user.gradeAverage,
+          contactNumber: user.contactNumber,
+        },
+      },
+    });
+  } catch (error) {
+    if (error.code === 11000) {
+      return res.status(409).json({
+        success: false,
+        message: "That student ID is already in use.",
+      });
+    }
+
+    console.error("Update profile error:", error.message);
+
+    return res.status(500).json({
+      success: false,
+      message: "Unable to update your profile.",
     });
   }
 });

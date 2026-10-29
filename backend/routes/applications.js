@@ -4,11 +4,14 @@ const mongoose = require("mongoose");
 const multer = require("multer");
 const fs = require("fs");
 const path = require("path");
+const crypto = require("crypto");
 
 const router = express.Router();
 
 const Application = require("../models/application");
 const Scholarship = require("../models/scholarship");
+const Student = require("../models/student");
+const User = require("../models/user");
 const { authenticateToken, requireAdmin } = require("../middleware/auth");
 
 // Store uploaded files outside the public frontend directory.
@@ -28,8 +31,12 @@ const storage = multer.diskStorage({
     callback(null, uploadDirectory);
   },
   filename: (req, file, callback) => {
-    // Generate a server-side filename; never use the supplied filename as a path.
-    callback(null, `${require("crypto").randomUUID()}${path.extname(file.originalname).toLowerCase()}`);
+    callback(
+      null,
+      `${crypto.randomUUID()}${path
+        .extname(file.originalname)
+        .toLowerCase()}`
+    );
   },
 });
 
@@ -71,7 +78,7 @@ function deleteUploadedFiles(files = []) {
   }
 }
 
-// Handle upload errors and remove any partially uploaded files.
+// Handle upload errors and remove partially uploaded files.
 function handleUploads(req, res, next) {
   upload.any()(req, res, (error) => {
     if (error) {
@@ -94,7 +101,7 @@ function handleUploads(req, res, next) {
   });
 }
 
-// POST: Student applies for a published scholarship and uploads required documents.
+// POST: Student applies for a published scholarship.
 router.post("/", authenticateToken, handleUploads, async (req, res) => {
   const files = req.files || [];
 
@@ -107,32 +114,49 @@ router.post("/", authenticateToken, handleUploads, async (req, res) => {
       });
     }
 
-    const {
-      scholarshipId,
-      course,
-      yearLevel,
-      gradeAverage,
-      statement,
-    } = req.body;
+    const { scholarshipId, statement } = req.body;
 
     if (
       !scholarshipId ||
       !mongoose.isValidObjectId(scholarshipId) ||
-      typeof course !== "string" ||
-      !course.trim() ||
-      typeof yearLevel !== "string" ||
-      !yearLevel.trim() ||
-      gradeAverage === undefined ||
-      !Number.isFinite(Number(gradeAverage)) ||
-      Number(gradeAverage) < 0 ||
-      Number(gradeAverage) > 100 ||
       typeof statement !== "string" ||
       !statement.trim()
     ) {
       deleteUploadedFiles(files);
       return res.status(400).json({
         success: false,
-        message: "Please provide valid application details.",
+        message:
+          "Please provide a valid scholarship and application statement.",
+      });
+    }
+
+    const studentProfile = await User.findById(req.user.id).select(
+      "fullName email studentId course yearLevel gradeAverage contactNumber"
+    );
+
+    if (!studentProfile) {
+      deleteUploadedFiles(files);
+      return res.status(404).json({
+        success: false,
+        message: "Student profile not found. Please log in again.",
+      });
+    }
+
+    if (
+      !studentProfile.studentId?.trim() ||
+      !studentProfile.course?.trim() ||
+      !studentProfile.yearLevel?.trim() ||
+      studentProfile.gradeAverage === null ||
+      studentProfile.gradeAverage === undefined ||
+      !Number.isFinite(Number(studentProfile.gradeAverage)) ||
+      Number(studentProfile.gradeAverage) < 0 ||
+      Number(studentProfile.gradeAverage) > 100
+    ) {
+      deleteUploadedFiles(files);
+      return res.status(400).json({
+        success: false,
+        message:
+          "Please complete your profile with your student ID, course, year level, and grade average before applying.",
       });
     }
 
@@ -146,15 +170,15 @@ router.post("/", authenticateToken, handleUploads, async (req, res) => {
       deleteUploadedFiles(files);
       return res.status(404).json({
         success: false,
-        message: "This scholarship is unavailable or its deadline has passed.",
+        message:
+          "This scholarship is unavailable or its deadline has passed.",
       });
     }
 
     const requiredDocuments = scholarship.requiredDocuments || [];
-
-    // Each required document is uploaded under document_0, document_1, etc.
     const fileByIndex = new Map();
 
+    // Each required document is uploaded as document_0, document_1, etc.
     for (const file of files) {
       const match = /^document_(\d+)$/.exec(file.fieldname);
 
@@ -175,7 +199,8 @@ router.post("/", authenticateToken, handleUploads, async (req, res) => {
         deleteUploadedFiles(files);
         return res.status(400).json({
           success: false,
-          message: "An uploaded document does not match the scholarship requirements.",
+          message:
+            "An uploaded document does not match the scholarship requirements.",
         });
       }
 
@@ -190,14 +215,15 @@ router.post("/", authenticateToken, handleUploads, async (req, res) => {
       deleteUploadedFiles(files);
       return res.status(400).json({
         success: false,
-        message: `Please upload all required documents: ${missingDocuments.join(", ")}.`,
+        message: `Please upload all required documents: ${missingDocuments.join(
+          ", "
+        )}.`,
       });
     }
 
     const documents = requiredDocuments
       .map((documentName, index) => {
         const file = fileByIndex.get(index);
-
         if (!file) return null;
 
         return {
@@ -213,9 +239,9 @@ router.post("/", authenticateToken, handleUploads, async (req, res) => {
     const application = await Application.create({
       student: req.user.id,
       scholarship: scholarship._id,
-      course: course.trim(),
-      yearLevel: yearLevel.trim(),
-      gradeAverage: Number(gradeAverage),
+      course: studentProfile.course.trim(),
+      yearLevel: studentProfile.yearLevel.trim(),
+      gradeAverage: Number(studentProfile.gradeAverage),
       statement: statement.trim(),
       documents,
     });
@@ -251,7 +277,7 @@ router.post("/", authenticateToken, handleUploads, async (req, res) => {
   }
 });
 
-// GET: Student views their own applications.
+// GET: Student views ALL their applications, regardless of status.
 router.get("/mine", authenticateToken, async (req, res) => {
   try {
     if (req.user.role !== "student") {
@@ -305,9 +331,8 @@ router.get("/", authenticateToken, requireAdmin, async (req, res) => {
   }
 });
 
-
-/* GET: Open an application document securely.
-   Admins and the student who owns the application may access it. */
+// GET: Open an application document securely.
+// Admins and the student who owns the application may access it.
 router.get(
   "/:id/documents/:documentId",
   authenticateToken,
@@ -355,7 +380,7 @@ router.get(
         });
       }
 
-      // Use only the stored filename, never a path supplied by the request.
+      // Use the stored filename, never a path supplied by the request.
       const safeFilename = path.basename(document.storageName);
       const filePath = path.resolve(uploadDirectory, safeFilename);
 
@@ -397,8 +422,8 @@ router.get(
   }
 );
 
-
-// PATCH: Admin approves or rejects an application.
+// PATCH: Admin reviews an application.
+// Approved and Rejected decisions are final and cannot be changed.
 router.patch(
   "/:id/status",
   authenticateToken,
@@ -431,15 +456,8 @@ router.patch(
         });
       }
 
-      const application = await Application.findByIdAndUpdate(
-        req.params.id,
-        {
-          status,
-          adminFeedback: adminFeedback.trim(),
-        },
-        { new: true, runValidators: true }
-      )
-        .populate("student", "fullName email")
+      const application = await Application.findById(req.params.id)
+        .populate("student", "fullName email studentId")
         .populate("scholarship", "title provider deadline");
 
       if (!application) {
@@ -449,9 +467,64 @@ router.patch(
         });
       }
 
+      if (!application.student || !application.scholarship) {
+        return res.status(400).json({
+          success: false,
+          message:
+            "The student or scholarship record could not be found.",
+        });
+      }
+
+      // LOCK: Once Approved or Rejected, the decision cannot be changed.
+      if (["Approved", "Rejected"].includes(application.status)) {
+        return res.status(409).json({
+          success: false,
+          message: `This application has already been ${application.status.toLowerCase()}. Its decision cannot be changed.`,
+          data: application,
+        });
+      }
+
+      // Save the review decision.
+      application.status = status;
+      application.adminFeedback = adminFeedback.trim();
+      await application.save();
+
+      // Only an Approved application creates or updates a scholarship record.
+      if (status === "Approved") {
+        await Student.findOneAndUpdate(
+          { email: application.student.email },
+          {
+            $set: {
+              fullName: application.student.fullName,
+              email: application.student.email,
+              course: application.course,
+              yearLevel: application.yearLevel,
+              scholarshipType: application.scholarship.title,
+              scholarshipStatus: "Approved",
+            },
+            $setOnInsert: {
+              studentId:
+                application.student.studentId ||
+                `STU-${application.student._id}`,
+            },
+          },
+          {
+            new: true,
+            upsert: true,
+            runValidators: true,
+            setDefaultsOnInsert: true,
+          }
+        );
+      }
+
       return res.status(200).json({
         success: true,
-        message: "Application status updated successfully.",
+        message:
+          status === "Approved"
+            ? "Application approved and student scholarship record updated."
+            : status === "Rejected"
+            ? "Application rejected. No approved scholarship record was created."
+            : "Application status updated successfully.",
         data: application,
       });
     } catch (error) {

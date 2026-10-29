@@ -14,6 +14,7 @@ app.use("/api/students", require("./routes/student"));
 app.use("/api/auth", require("./routes/auth"));
 app.use("/api/scholarship", require("./routes/scholarship"));
 app.use("/api/applications", require("./routes/applications"));
+app.use("/api/ai", require("./routes/ai"));
 
 // Test route
 app.get("/", (req, res) => {
