@@ -29,9 +29,11 @@ async function startServer() {
     await mongoose.connect(process.env.MONGODB_URI);
     console.log("Connected to MongoDB successfully!");
 
-    app.listen(PORT, () => {
-      console.log(`Server running at http://localhost:${PORT}`);
+    
+    app.listen(PORT, "0.0.0.0", () => {
+      console.log(`Server running on port ${PORT}`);
     });
+
   } catch (error) {
     console.error("MongoDB connection failed:", error.message);
     process.exit(1);
